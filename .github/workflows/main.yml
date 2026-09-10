@@ -1,9 +1,13 @@
-name: Build Godot Project
+name: Build NetShooter
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3-stable"
+  GODOT_RELEASE: "4.3-stable"
 
 permissions:
   contents: write
@@ -17,23 +21,47 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 下载 Godot
+        shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_win64.exe.zip" -OutFile "godot.zip"
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_RELEASE }}/Godot_v${{ env.GODOT_RELEASE }}_win64.exe.zip" -OutFile "godot.zip"
           Expand-Archive godot.zip -DestinationPath .
-          Rename-Item "Godot_v4.3-stable_win64.exe" "godot.exe"
+          Rename-Item "Godot_v${{ env.GODOT_RELEASE }}_win64.exe" "godot.exe"
+          .\godot.exe --version
 
-      - name: 下载导出模板
+      - name: 安装导出模板
+        shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -OutFile "templates.tpz"
-          New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\Godot\app_userdata\export_templates\4.3.stable"
-          Copy-Item "templates.tpz" "$env:LOCALAPPDATA\Godot\app_userdata\export_templates\4.3.stable\windows_64.zip" -Force
+          $tplDir = "$env:LOCALAPPDATA\Godot\app_userdata\export_templates\${{ env.GODOT_RELEASE }}"
+          New-Item -ItemType Directory -Force -Path $tplDir
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_RELEASE }}/Godot_v${{ env.GODOT_RELEASE }}_export_templates.tpz" -OutFile "templates.tpz"
+          Expand-Archive templates.tpz -DestinationPath "templates" -Force
+          # 模板在 templates/templates/ 子目录下
+          Copy-Item "templates\templates\*" $tplDir -Recurse -Force
+          Write-Host "已安装的模板："
+          Get-ChildItem $tplDir
+
+      - name: 列出可用的导出预设
+        shell: pwsh
+        run: .\godot.exe --headless --list-exports
 
       - name: 导出 Windows EXE
+        shell: pwsh
         run: |
-          .\godot.exe --headless --export-release "Windows Desktop" "build/windows/NetShooter.exe"
+          New-Item -ItemType Directory -Force -Path "build\windows"
+          .\godot.exe --headless --quit-on-finish --export-release "Windows Desktop" "build\windows\NetShooter.exe" 2>&1 | Out-String -Stream
+          Write-Host "导出目录内容："
+          Get-ChildItem "build\windows" -Recurse
 
       - name: 打包 zip
-        run: Compress-Archive "build/windows/NetShooter.exe" "build/windows/NetShooter-windows.zip"
+        shell: pwsh
+        run: |
+          if (Test-Path "build\windows\NetShooter.exe") {
+            Compress-Archive "build\windows\NetShooter.exe" "build\windows\NetShooter-windows.zip" -Force
+            Write-Host "打包成功"
+          } else {
+            Write-Error "EXE 未生成！请检查 --list-exports 输出的预设名称是否与 'Windows Desktop' 一致"
+            exit 1
+          }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -49,21 +77,38 @@ jobs:
 
       - name: 下载 Godot
         run: |
-          wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip -O godot.zip
+          wget -q https://github.com/godotengine/godot/releases/download/${{ env.GODOT_RELEASE }}/Godot_v${{ env.GODOT_RELEASE }}_linux.x86_64.zip -O godot.zip
           unzip -q godot.zip
-          mv Godot_v4.3-stable_linux.x86_64 godot
+          mv Godot_v${{ env.GODOT_RELEASE }}_linux.x86_64 godot
           chmod +x godot
+          ./godot --version
+          wget -q https://github.com/godotengine/godot/releases/download/${{ env.GODOT_RELEASE }}/Godot_v${{ env.GODOT_RELEASE }}_export_templates.tpz -O templates.tpz
+
+      - name: 安装导出模板
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates/${{ env.GODOT_RELEASE }}
+          unzip -q templates.tpz -d /tmp/tpl
+          cp /tmp/tpl/templates/* ~/.local/share/godot/export_templates/${{ env.GODOT_RELEASE }}/
+          ls -la ~/.local/share/godot/export_templates/${{ env.GODOT_RELEASE }}/
 
       - name: 安装 Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: 安装 Android Build 模板 (Gradle)
+        run: |
+          mkdir -p android/build
+          unzip -o ~/.local/share/godot/export_templates/${{ env.GODOT_RELEASE }}/android_source.zip -d android/build/
+          echo "${{ env.GODOT_RELEASE }}" > android/.build_version
+          ls -la android/build/
+
+      - name: 列出可用的导出预设
+        run: ./godot --headless --list-exports
+
       - name: 导出 Android APK
         run: |
-          mkdir -p ~/.local/share/godot/export_templates/4.3.stable
-          wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz -O templates.tpz
-          unzip -q templates.tpz -d /tmp/tpl
-          cp /tmp/tpl/android_* ~/.local/share/godot/export_templates/4.3.stable/
-          ./godot --headless --export-release "Android" "build/android/NetShooter.apk"
+          mkdir -p build/android
+          ./godot --headless --quit-on-finish --export-release "Android" "build/android/NetShooter.apk" 2>&1 | cat
+          ls -la build/android/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -78,24 +123,53 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 下载 Godot
+        shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_win64.exe.zip" -OutFile "godot.zip"
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_RELEASE }}/Godot_v${{ env.GODOT_RELEASE }}_win64.exe.zip" -OutFile "godot.zip"
           Expand-Archive godot.zip -DestinationPath .
-          Rename-Item "Godot_v4.3-stable_win64.exe" "godot.exe"
+          Rename-Item "Godot_v${{ env.GODOT_RELEASE }}_win64.exe" "godot.exe"
+          .\godot.exe --version
+
+      - name: 安装导出模板
+        shell: pwsh
+        run: |
+          $tplDir = "$env:LOCALAPPDATA\Godot\app_userdata\export_templates\${{ env.GODOT_RELEASE }}"
+          New-Item -ItemType Directory -Force -Path $tplDir
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/${{ env.GODOT_RELEASE }}/Godot_v${{ env.GODOT_RELEASE }}_export_templates.tpz" -OutFile "templates.tpz"
+          Expand-Archive templates.tpz -DestinationPath "templates" -Force
+          Copy-Item "templates\templates\*" $tplDir -Recurse -Force
+          Write-Host "已安装的模板："
+          Get-ChildItem $tplDir
+
+      - name: 列出可用的导出预设
+        shell: pwsh
+        run: .\godot.exe --headless --list-exports
 
       - name: 导出专用服务器
+        shell: pwsh
         run: |
-          .\godot.exe --headless --export-release "Windows Server" "build/server/NetShooterServer.exe"
+          New-Item -ItemType Directory -Force -Path "build\server"
+          .\godot.exe --headless --quit-on-finish --export-release "Windows Server" "build\server\NetShooterServer.exe" 2>&1 | Out-String -Stream
+          Write-Host "导出目录内容："
+          Get-ChildItem "build\server" -Recurse
 
       - name: 打包 zip
-        run: Compress-Archive "build/server/NetShooterServer.exe" "build/server/NetShooter-Server.zip"
+        shell: pwsh
+        run: |
+          if (Test-Path "build\server\NetShooterServer.exe") {
+            Compress-Archive "build\server\NetShooterServer.exe" "build\server\NetShooter-Server.zip" -Force
+            Write-Host "打包成功"
+          } else {
+            Write-Error "Server EXE 未生成！请检查 --list-exports 输出的预设名称是否与 'Windows Server' 一致"
+            exit 1
+          }
 
       - uses: actions/upload-artifact@v4
         with:
           name: server
           path: build/server/NetShooter-Server.zip
 
-  # ============ 发版（关键！） ============
+  # ============ 发版 ============
   release:
     name: Create Release
     needs: [windows-client, android, server]
