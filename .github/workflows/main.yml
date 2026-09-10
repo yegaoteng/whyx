@@ -1,0 +1,43 @@
+name: Build NetShooter
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder for Windows Build
+        run: echo "此处将执行 Godot 导出 Windows EXE 命令"
+
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder for Android Build
+        run: echo "此处将执行 Godot 导出 Android APK 命令"
+
+  server:
+    name: Build Windows Server
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder for Server Build
+        run: echo "此处将执行 Godot 导出 Dedicated Server 命令"
+
+  release:
+    name: Create Release
+    needs: [windows, android, server]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release Placeholder
+        run: echo "构建完成后将在此处自动生成 Release 并上传安装包"
