@@ -1,4 +1,4 @@
-name: Build NetShooter
+name: Build Godot Project
 
 on:
   push:
@@ -9,35 +9,121 @@ permissions:
   contents: write
 
 jobs:
-  windows:
+  # ============ Windows 客户端 ============
+  windows-client:
     name: Build Windows EXE
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder for Windows Build
-        run: echo "此处将执行 Godot 导出 Windows EXE 命令"
 
+      - name: 下载 Godot
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_win64.exe.zip" -OutFile "godot.zip"
+          Expand-Archive godot.zip -DestinationPath .
+          Rename-Item "Godot_v4.3-stable_win64.exe" "godot.exe"
+
+      - name: 下载导出模板
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -OutFile "templates.tpz"
+          New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\Godot\app_userdata\export_templates\4.3.stable"
+          Copy-Item "templates.tpz" "$env:LOCALAPPDATA\Godot\app_userdata\export_templates\4.3.stable\windows_64.zip" -Force
+
+      - name: 导出 Windows EXE
+        run: |
+          .\godot.exe --headless --export-release "Windows Desktop" "build/windows/NetShooter.exe"
+
+      - name: 打包 zip
+        run: Compress-Archive "build/windows/NetShooter.exe" "build/windows/NetShooter-windows.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: build/windows/NetShooter-windows.zip
+
+  # ============ Android APK ============
   android:
     name: Build Android APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder for Android Build
-        run: echo "此处将执行 Godot 导出 Android APK 命令"
 
+      - name: 下载 Godot
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip -O godot.zip
+          unzip -q godot.zip
+          mv Godot_v4.3-stable_linux.x86_64 godot
+          chmod +x godot
+
+      - name: 安装 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 导出 Android APK
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates/4.3.stable
+          wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz -O templates.tpz
+          unzip -q templates.tpz -d /tmp/tpl
+          cp /tmp/tpl/android_* ~/.local/share/godot/export_templates/4.3.stable/
+          ./godot --headless --export-release "Android" "build/android/NetShooter.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: build/android/NetShooter.apk
+
+  # ============ Windows 专用服务器 ============
   server:
     name: Build Windows Server
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder for Server Build
-        run: echo "此处将执行 Godot 导出 Dedicated Server 命令"
 
+      - name: 下载 Godot
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_win64.exe.zip" -OutFile "godot.zip"
+          Expand-Archive godot.zip -DestinationPath .
+          Rename-Item "Godot_v4.3-stable_win64.exe" "godot.exe"
+
+      - name: 导出专用服务器
+        run: |
+          .\godot.exe --headless --export-release "Windows Server" "build/server/NetShooterServer.exe"
+
+      - name: 打包 zip
+        run: Compress-Archive "build/server/NetShooterServer.exe" "build/server/NetShooter-Server.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server
+          path: build/server/NetShooter-Server.zip
+
+  # ============ 发版（关键！） ============
   release:
     name: Create Release
-    needs: [windows, android, server]
+    needs: [windows-client, android, server]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Release Placeholder
-        run: echo "构建完成后将在此处自动生成 Release 并上传安装包"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 列目录确认产物
+        run: ls -R artifacts
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/windows/*.zip
+            artifacts/android/*.apk
+            artifacts/server/*.zip
+          generate_release_notes: true
+          body: |
+            ## NetShooter ${{ github.ref_name }}
+
+            ### 下载
+            - **Windows 客户端**：`NetShooter-windows.zip`，解压运行 `.exe`
+            - **Android APK**：`NetShooter.apk`，手机安装
+            - **Windows 专用服务器**：`NetShooter-Server.zip`，部署到服务器
+
+            ### 联机
+            服务器地址：`game.xfan.l.cd:7777`
